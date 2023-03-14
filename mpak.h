@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdio>
+#include <unordered_map>
+#include <string>
 
 // Maximum number of files in a package
 #define MPAK_MAX_FILES 1024
@@ -25,6 +27,7 @@ struct MPAK_FILE {
     UINT32 offsets[MPAK_MAX_FILES];// File offsets
     UINT32 sizes[MPAK_MAX_FILES];  // File sizes
     UINT32 current_file_size;      // Size of the current file being open
+    std::unordered_map<std::string, int> files_map;
 
     void init();
 

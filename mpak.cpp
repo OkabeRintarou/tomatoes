@@ -165,6 +165,7 @@ int MPAK_FILE::open_mpk(int open_mode, const char *file, const char *override) {
         fread(&num_files, sizeof(num_files), 1, fpointer);
         num_files = mpk_swap(num_files);
 
+        files_map.reserve(num_files * 2);
         // Read the file information
         UINT32 f;
         for (f = 0; f < num_files; f++) {
@@ -174,6 +175,8 @@ int MPAK_FILE::open_mpk(int open_mode, const char *file, const char *override) {
             // Offset
             fread(&offsets[f], sizeof(offsets[f]), 1, fpointer);
             offsets[f] = mpk_swap(offsets[f]);
+
+            files_map[std::string(files[f])] = f;
         }
         // Compute the size from the offsets
         for (f = 0; f < num_files - 1; f++)
@@ -186,4 +189,99 @@ int MPAK_FILE::open_mpk(int open_mode, const char *file, const char *override) {
 
         return 1;
     }
+}
+
+void MPAK_FILE::close_mpk() {
+    if (mode != MPAK_READ && mode != MPAK_WRITE)
+        return;
+
+    if (mode == MPAK_READ) {
+        mode = MPAK_CLOSED;
+        return;
+    }
+    // We're in write mode, so write the file table to the end of the file.
+    // First we get the correct file table offset
+    // TODO: implement it
+}
+
+// Get a pointer to a certain file in the package. It first looks
+// from the override directory, and if the file isn't there it looks
+// from the package. The user MUST fclose() the pointer himself!
+// Returns NULL on failure
+FILE *MPAK_FILE::open_file(const char *file) {
+    if (mode != MPAK_READ)
+        return nullptr;
+
+    if (strcmp(override_dir, "null") != 0) {
+        char test_file[256];
+        sprintf(test_file, "%s%s", override_dir, file);
+
+        FILE *fin = fopen(test_file, "rb");
+        if (fin) {
+            fseek(fin, 0, SEEK_SET);
+            current_file_size = ftell(fin);
+            fseek(fin, 0, SEEK_SET);
+            return fin;
+        }
+    }
+    int idx = find_file(file);
+    if (idx != -1) {
+        FILE *fin = fopen(mpk_file, "rb");
+        if (fin == nullptr)
+            return nullptr;
+        fseek(fin, offsets[idx], SEEK_SET);
+        current_file_size = sizes[idx];
+        return fin;
+    }
+    return nullptr;
+}
+
+int MPAK_FILE::find_file(const char *file) {
+    auto it = files_map.find(file);
+    if (it == std::end(files_map))
+        return -1;
+    return it->second;
+}
+
+int MPAK_FILE::extract_file(const char *file, const char *path) {
+    FILE *fin = open_file(file);
+    if (!fin)
+        return 0;
+
+    char file_out[256];
+    if (path != nullptr)
+        sprintf(file_out, "%s/%s", path, file);
+    else
+        strcpy(file_out, file);
+
+    FILE *fout = fopen(file_out, "wb");
+    if (!fout) {
+        fclose(fin);
+        return 0;
+    }
+
+    // Read in 16kb chunks and split them out
+    const UINT32 buf_size = 16384;
+    char buffer[buf_size];
+    UINT32 bytes_written = 0;
+    UINT32 total_bytes = current_file_size;
+
+    for (;;) {
+        auto bytes_left = total_bytes - bytes_written;
+        if (bytes_left > buf_size)
+            bytes_left = buf_size;
+
+        fread(buffer, sizeof(char), bytes_left, fin);
+        fwrite(buffer, sizeof(char), bytes_left, fout);
+        bytes_written += bytes_left;
+
+        if (bytes_written >= total_bytes)
+            break;
+    }
+
+    fflush(fout);
+    fclose(fin);
+    fclose(fout);
+
+    return 0;
 }
